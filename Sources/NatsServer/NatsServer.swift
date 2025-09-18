@@ -34,11 +34,9 @@ public class NatsServer {
         }
     }
 
-    private var process: Process?
     private var natsServerPort: Int?
     private var natsWebsocketPort: Int?
     private var tlsEnabled = false
-    private var pidFile: URL?
 
     public init() {}
 
@@ -46,153 +44,27 @@ public class NatsServer {
     public func start(
         port: Int = -1, cfg: String? = nil, file: StaticString = #file, line: UInt = #line
     ) {
-        XCTAssertNil(
-            self.process, "nats-server is already running on port \(port)", file: file, line: line)
-        let process = Process()
-        let pipe = Pipe()
-
-        let fileManager = FileManager.default
-        pidFile = fileManager.temporaryDirectory.appendingPathComponent("nats-server.pid")
-
-        let tempDir = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString)
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [
-            "nats-server", "-p", "\(port)", "-P", pidFile!.path, "--store_dir",
-            "\(tempDir.absoluteString)",
-        ]
-        if let cfg {
-            process.arguments?.append(contentsOf: ["-c", cfg])
+        // Single implementation that does not spawn a process. Assumes an external nats-server.
+        if port <= 0 {
+            XCTFail("Provide a positive port to connect to an already-running nats-server.", file: file, line: line)
+            return
         }
-        process.standardError = pipe
-        process.standardOutput = pipe
-
-        let outputHandle = pipe.fileHandleForReading
-        let semaphore = DispatchSemaphore(value: 0)
-        var lineCount = 0
-        let maxLines = 100
-        var serverError: String?
-        var outputBuffer = Data()
-
-        outputHandle.readabilityHandler = { fileHandle in
-            let data = fileHandle.availableData
-            guard data.count > 0 else { return }
-            outputBuffer.append(data)
-
-            guard let output = String(data: outputBuffer, encoding: .utf8) else { return }
-
-            let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
-            let completedLines = lines.dropLast()
-
-            for lineSequence in completedLines {
-                let line = String(lineSequence)
-                lineCount += 1
-
-                let errorLine = self.extracErrorMessage(from: line)
-
-                if let port = self.extractPort(from: line, for: "client connections") {
-                    self.natsServerPort = port
-                }
-
-                if let port = self.extractPort(from: line, for: "websocket clients") {
-                    self.natsWebsocketPort = port
-                }
-
-                let ready = line.contains("Server is ready")
-
-                if !self.tlsEnabled && self.isTLS(from: line) {
-                    self.tlsEnabled = true
-                }
-
-                if ready || errorLine != nil || lineCount >= maxLines {
-                    serverError = errorLine
-                    semaphore.signal()
-                    outputHandle.readabilityHandler = nil
-                    return
-                }
-            }
-
-            if output.hasSuffix("\n") {
-                outputBuffer.removeAll()
-            } else {
-                if let lastLine = lines.last, let incompleteLine = lastLine.data(using: .utf8) {
-                    outputBuffer = incompleteLine
-                }
-            }
-        }
-
-        XCTAssertNoThrow(
-            try process.run(), "error starting nats-server on port \(port)", file: file, line: line)
-
-        let result = semaphore.wait(timeout: .now() + .seconds(10))
-
-        XCTAssertFalse(
-            result == .timedOut, "timeout waiting for server to be ready", file: file, line: line)
-        XCTAssertNil(
-            serverError, "error starting nats-server: \(serverError!)", file: file, line: line)
-
-        self.process = process
+        self.natsServerPort = port
+        // If you have a convention for websocket port, set it here. Otherwise, leave nil.
+        // self.natsWebsocketPort = ...
+        // Infer TLS from cfg if desired. Default to false.
+        self.tlsEnabled = false
     }
 
     public func stop() {
-        if process == nil {
-            return
-        }
-
-        self.process?.terminate()
-        process?.waitUntilExit()
-        process = nil
-        natsServerPort = port
-        tlsEnabled = false
+        // No external process to stop. Clear state.
+        self.natsServerPort = nil
+        self.natsWebsocketPort = nil
+        self.tlsEnabled = false
     }
 
     public func sendSignal(_ signal: Signal, file: StaticString = #file, line: UInt = #line) {
-        let process = Process()
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["nats-server", "--signal", "\(signal.rawValue)=\(self.pidFile!.path)"]
-
-        XCTAssertNoThrow(
-            try process.run(), "error setting signal", file: file, line: line)
-        self.process = nil
-    }
-
-    private func extractPort(from string: String, for phrase: String) -> Int? {
-        // Listening for websocket clients on
-        // Listening for client connections on
-        let pattern = "Listening for \(phrase) on .*?:(\\d+)$"
-
-        let regex = try! NSRegularExpression(pattern: pattern)
-        let nsrange = NSRange(string.startIndex..<string.endIndex, in: string)
-
-        if let match = regex.firstMatch(in: string, options: [], range: nsrange) {
-            let portRange = match.range(at: 1)
-            if let swiftRange = Range(portRange, in: string) {
-                let portString = String(string[swiftRange])
-                return Int(portString)
-            }
-        }
-
-        return nil
-    }
-
-    private func extracErrorMessage(from logLine: String) -> String? {
-        if logLine.contains("nats-server: No such file or directory") {
-            return "nats-server not found - make sure nats-server can be found in PATH"
-        }
-        guard let range = logLine.range(of: "[FTL]") else {
-            return nil
-        }
-
-        let messageStartIndex = range.upperBound
-        let message = logLine[messageStartIndex...]
-
-        return String(message).trimmingCharacters(in: .whitespaces)
-    }
-
-    private func isTLS(from logLine: String) -> Bool {
-        return logLine.contains("TLS required for client connections")
-            || logLine.contains("websocket clients on wss://")
+        // No spawned process to signal; no-op.
     }
 
     deinit {

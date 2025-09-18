@@ -1,4 +1,4 @@
-// swift-tools-version:5.7
+// swift-tools-version:5.9
 
 import PackageDescription
 
@@ -7,6 +7,7 @@ let package = Package(
     platforms: [
         .macOS(.v13),
         .iOS(.v13),
+        .visionOS(.v1)
     ],
     products: [
         .library(name: "Nats", targets: ["Nats"]),
@@ -16,9 +17,9 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.2"),
-        .package(url: "https://github.com/nats-io/nkeys.swift.git", from: "0.1.2"),
+        .package(url: "https://github.com/rfha/nkeys.swift.git", branch: "main"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.0.0"),
-        .package(url: "https://github.com/Jarema/swift-nuid.git", from: "0.2.0"),
+        .package(url: "https://github.com/Jarema/swift-nuid.git", from: "0.3.0"),
     ],
     targets: [
         .target(
